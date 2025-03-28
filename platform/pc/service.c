@@ -491,6 +491,12 @@ void init_service(u64 rdi, u64 rsi, hvm_start_info start_info)
             }
             token = runtime_strtok_r(0, delim, &rest);
         }
+
+        if (cmdline_verbose_logging) {
+            early_debug("Kernel command line: ");
+            early_debug_sstring(sstring_from_cstring(cmdline, cmdline_size));
+            early_debug("\n");
+        }
     }
 
     if (ramdisk)
