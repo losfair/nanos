@@ -147,6 +147,8 @@ pvh_start32:
         mov dword [edx + 12], 0
         mov cr3, eax
         ENTER_LONG_MODE eax
+
+pvh_start_long_mode:
         lgdt [PVH_START_BASE + pvh_gdt.Pointer - boot_base]
         jmp pvh_gdt.Code:(PVH_START_BASE + pvh_long_mode - boot_base)
 
@@ -162,6 +164,7 @@ pvh_zero_page:
 bits 64
 pvh_long_mode:
         mov edi, ebx ; retrieve start info address from ebx register
+        mov ecx, [ebx]
         jmp pvh_start
 
 align 16

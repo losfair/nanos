@@ -14,7 +14,8 @@
     %define EFER_NXE (1<<11)
 
     %macro PREPARE_LONG_MODE 1
-    mov %1, CR4_PAE
+    mov %1, cr4
+    or %1, CR4_PAE
     mov cr4, %1
 
     mov ecx, MSR_EFER ; Read from the EFER MSR.

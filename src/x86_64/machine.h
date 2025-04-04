@@ -10,8 +10,8 @@
 /* kernel or userland */
 #include <def64.h>
 
-#define KMEM_BASE   0xffff800000000000ull
-#define USER_LIMIT  0x0000800000000000ull
+#define KMEM_BASE   0x0000402000000000ull
+#define USER_LIMIT  0x0000400000000000ull
 
 static inline __attribute__((always_inline)) u8 is_immediate(value v)
 {
