@@ -141,16 +141,29 @@ vqmsg allocate_vqmsg(virtqueue vq)
 
 void vqmsg_push(virtqueue vq, vqmsg m, u64 phys_addr, u32 len, boolean write)
 {
-    assert(buffer_extend(m->descv, sizeof(struct vring_desc)));
-    struct vring_desc * d = buffer_ref(m->descv, m->count * sizeof(struct vring_desc));
-    d->busaddr = phys_addr;
-    d->len = len;
-    d->flags = write ? VRING_DESC_F_WRITE : 0;
-    d->next = 0;
-    buffer_produce(m->descv, sizeof(struct vring_desc));
-    m->count++;
-    virtqueue_debug_verbose("%s: vq %s, vqmsg %p, phys_addr 0x%lx, len 0x%x, %s, m->count now %d\n",
-                            func_ss, vq->name, m, phys_addr, len, write ? "write" : "read", m->count);
+    u64 start_2mb_page = phys_addr >> 21;
+    u64 end_2mb_page = (phys_addr + len - 1) >> 21;
+
+    for(u64 page = start_2mb_page; page <= end_2mb_page; page++) {
+        u64 page_start = page << 21;
+        u64 page_end = (page + 1) << 21;
+
+        u64 range_start = MIN(MAX(phys_addr, page_start), page_end);
+        u64 range_end = MIN(MAX(phys_addr + len, page_start), page_end);
+
+        if (range_end > range_start) {
+            assert(buffer_extend(m->descv, sizeof(struct vring_desc)));
+            struct vring_desc * d = buffer_ref(m->descv, m->count * sizeof(struct vring_desc));
+            d->busaddr = range_start;
+            d->len = range_end - range_start;
+            d->flags = write ? VRING_DESC_F_WRITE : 0;
+            d->next = 0;
+            buffer_produce(m->descv, sizeof(struct vring_desc));
+            m->count++;
+            virtqueue_debug_verbose("%s: vq %s, vqmsg %p, phys_addr 0x%lx, len 0x%x, %s, m->count now %d\n",
+                                    func_ss, vq->name, m, range_start, range_end - range_start, write ? "write" : "read", m->count);
+        }
+    }
 }
 
 static void virtqueue_fill(virtqueue vq);

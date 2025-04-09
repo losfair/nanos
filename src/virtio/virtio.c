@@ -80,7 +80,10 @@ void vtdev_cfg_read_mem(vtdev dev, u64 offset, void *dest, bytes len)
 {
     switch (dev->transport) {
     case VTIO_TRANSPORT_MMIO:
-        runtime_memcpy(dest, ((vtmmio)dev)->vbase + VTMMIO_OFFSET_CONFIG + offset, len);
+        for (int i = 0; i < len; i++) {
+            *((u8 *)dest + i) = vtmmio_get_u8((vtmmio)dev, VTMMIO_OFFSET_CONFIG + offset + i);
+        }
+        // runtime_memcpy(dest, ((vtmmio)dev)->vbase + VTMMIO_OFFSET_CONFIG + offset, len);
         break;
     case VTIO_TRANSPORT_PCI:
         for (int i = 0; i < len; i++)

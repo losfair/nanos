@@ -35,6 +35,39 @@ typedef struct vtmmio_dev {
     thunk cfg_chg_handler;
 } *vtmmio;
 
+#define VTMMIO_HYPERCALL
+
+#ifdef VTMMIO_HYPERCALL
+static inline u64 vtmmio_hypercall(u64 opcode, u64 addr, u64 val)
+{
+    register u64 rax asm("rax") = opcode;
+    register u64 rbx asm("rbx") = addr;
+    register u64 rcx asm("rcx") = val;
+
+    asm volatile("vmcall" : "+r"(rax) : "r"(rbx), "r"(rcx) : "memory");
+    return rax;
+}
+
+#define vtmmio_get_u8(dev, offset) ((u8)vtmmio_hypercall(0x1000, (dev)->membase + offset, 0))
+
+#define vtmmio_set_u8(dev, offset, value)  do {    \
+    vtmmio_hypercall(0x1010, (dev)->membase + offset, value); \
+} while (0)
+
+#define vtmmio_get_u16(dev, offset) ((u16)vtmmio_hypercall(0x1001, (dev)->membase + offset, 0))
+
+#define vtmmio_set_u16(dev, offset, value)  do {    \
+    vtmmio_hypercall(0x1011, (dev)->membase + offset, value); \
+} while (0)
+
+#define vtmmio_get_u32(dev, offset) ((u32)vtmmio_hypercall(0x1002, (dev)->membase + offset, 0))
+
+#define vtmmio_set_u32(dev, offset, value)  do {    \
+    vtmmio_hypercall(0x1012, (dev)->membase + offset, value); \
+} while (0)
+
+#else
+
 #define vtmmio_get_u8(dev, offset) (*((volatile u8 *)((dev)->vbase + offset)))
 
 #define vtmmio_set_u8(dev, offset, value)  do {    \
@@ -52,6 +85,7 @@ typedef struct vtmmio_dev {
 #define vtmmio_set_u32(dev, offset, value)  do {    \
     *(volatile u32 *)((dev)->vbase + offset) = value; \
 } while (0)
+#endif
 
 static inline void vtmmio_set_u64(vtmmio dev, u64 offset, u64 value)
 {

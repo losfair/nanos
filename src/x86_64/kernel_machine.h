@@ -165,6 +165,35 @@ void init_cpu_features();
 void set_ist(struct cpuinfo_machine *cpu, int i, u64 sp);
 void install_gdt64_and_tss(void *tss_desc, void *tss, void *gdt, void *gdt_pointer);
 
+static inline u64 mmio_hypercall(u64 opcode, u64 addr, u64 val)
+{
+    register u64 rax asm("rax") = opcode;
+    register u64 rbx asm("rbx") = addr;
+    register u64 rcx asm("rcx") = val;
+
+    asm volatile("vmcall" : "+r"(rax) : "r"(rbx), "r"(rcx) : "memory");
+    return rax;
+}
+static inline u32 hvmmio_read_32(u64 addr)
+{
+    return (u32)mmio_hypercall(0x1002, addr, 0);
+}
+
+static inline u64 hvmmio_read_64(u64 addr)
+{
+    return (u64)mmio_hypercall(0x1003, addr, 0);
+}
+
+static inline void hvmmio_write_32(u64 addr, u32 val)
+{
+    mmio_hypercall(0x1012, addr, val);
+}
+
+static inline void hvmmio_write_64(u64 addr, u64 val)
+{
+    mmio_hypercall(0x1013, addr, val);
+}
+
 /* device mmio region access */
 static inline u32 mmio_read_32(u64 addr)
 {

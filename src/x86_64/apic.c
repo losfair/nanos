@@ -196,6 +196,23 @@ static void ioapic_init(kernel_heaps kh, u64 membase)
         pageflags_writable(pageflags_device()));
 }
 
+#define MMIO_HYPERCALL
+
+#ifdef MMIO_HYPERCALL
+static u32 ioapic_read(int reg)
+{
+    hvmmio_write_32(ioapic_membase + IOAPIC_IOREGSEL, reg);
+    write_barrier();
+    return hvmmio_read_32(ioapic_membase + IOAPIC_IOWIN);
+}
+
+static void ioapic_write(int reg, u32 data)
+{
+    hvmmio_write_32(ioapic_membase + IOAPIC_IOREGSEL, reg);
+    write_barrier();
+    hvmmio_write_32(ioapic_membase + IOAPIC_IOWIN, data);
+}
+#else
 static u32 ioapic_read(int reg)
 {
     *(volatile u32 *)(ioapic_vbase + IOAPIC_IOREGSEL) = reg;
@@ -209,6 +226,7 @@ static void ioapic_write(int reg, u32 data)
     write_barrier();
     *(volatile u32 *)(ioapic_vbase + IOAPIC_IOWIN) = data;
 }
+#endif
 
 void ioapic_set_int(unsigned int gsi, u64 v, u32 target_cpu)
 {
