@@ -4,6 +4,7 @@
 
 #include "virtio_internal.h"
 #include "virtio_pci.h"
+#include "virtio_mmio.h"
 
 #ifdef VIRTIO_SCSI_DEBUG
 # define virtio_scsi_debug(x, ...) do {tprintf(sym(virtio_scsi), 0, ss(x), ##__VA_ARGS__);} while(0)
@@ -105,7 +106,7 @@ struct virtio_scsi_request {
 typedef struct virtio_scsi_request *virtio_scsi_request;
 
 struct virtio_scsi {
-    vtpci v;
+    vtdev v;
 
     struct virtqueue *command;
 
@@ -147,7 +148,7 @@ static void virtio_scsi_enqueue_event(virtio_scsi s, virtio_scsi_event e, vqfini
 
 closure_function(2, 0, void, deallocate_scsi_disk, virtio_scsi, s, virtio_scsi_disk, d)
 {
-    deallocate(bound(s)->v->virtio_dev.general, bound(d), sizeof(struct virtio_scsi_disk));
+    deallocate(bound(s)->v->general, bound(d), sizeof(struct virtio_scsi_disk));
 }
 
 static void virtio_scsi_detach_disk(virtio_scsi s, u16 target, u16 lun)
@@ -159,7 +160,7 @@ static void virtio_scsi_detach_disk(virtio_scsi s, u16 target, u16 lun)
             continue;
         vector_delete(s->disks, i);
         spin_unlock(&s->lock);
-        storage_detach((storage_req_handler)&d->req_handler, closure(s->v->virtio_dev.general, deallocate_scsi_disk, s, d));
+        storage_detach((storage_req_handler)&d->req_handler, closure(s->v->general, deallocate_scsi_disk, s, d));
         return;
     }
     spin_unlock(&s->lock);
@@ -201,7 +202,7 @@ closure_function(2, 1, void, virtio_scsi_event_complete,
 static void virtio_scsi_enqueue_event(virtio_scsi s, virtio_scsi_event e, vqfinish c)
 {
     if (!c)
-        c = closure(s->v->virtio_dev.general, virtio_scsi_event_complete,
+        c = closure(s->v->general, virtio_scsi_event_complete,
             s, e);
     virtqueue vq = s->eventq;
     vqmsg m = allocate_vqmsg(vq);
@@ -223,7 +224,7 @@ closure_function(4, 1, void, virtio_scsi_request_complete,
     virtio_scsi s = bound(s);
     virtio_scsi_request r = bound(r);
     apply(bound(c), s, r);
-    backed_heap contiguous = s->v->virtio_dev.contiguous;
+    backed_heap contiguous = s->v->contiguous;
     dealloc_unmap(contiguous, r, bound(r_phys),
                   sizeof(*r) + r->alloc_len);
     closure_finish();
@@ -235,7 +236,7 @@ static virtio_scsi_request virtio_scsi_alloc_request(virtio_scsi s, u16 target, 
     int alloc_len = scsi_data_len(cmd);
     virtio_scsi_debug("%s: cmd 0x%x, data len %d\n", func_ss, cmd, alloc_len);
 
-    virtio_scsi_request r = alloc_map(s->v->virtio_dev.contiguous,
+    virtio_scsi_request r = alloc_map(s->v->contiguous,
         sizeof(*r) + alloc_len, r_phys);
     assert(r != INVALID_ADDRESS);
     zero((void *) &r->req, sizeof(r->req));
@@ -253,7 +254,7 @@ static virtio_scsi_request virtio_scsi_alloc_request(virtio_scsi s, u16 target, 
 static void virtio_scsi_enqueue_request(virtio_scsi s, virtio_scsi_request r,
                                         u64 r_phys, void *buf, u64 length, vsr_complete c)
 {
-    vqfinish f = closure(s->v->virtio_dev.general, virtio_scsi_request_complete,
+    vqfinish f = closure(s->v->general, virtio_scsi_request_complete,
         c, s, r, r_phys);
     virtqueue vq = s->requestq;
     vqmsg m = allocate_vqmsg(vq);
@@ -313,13 +314,13 @@ static void virtio_scsi_io(virtio_scsi_disk d, u8 cmd, void *buf, range blocks,
     virtio_scsi_debug("%s: cmd %d, blocks %R, addr 0x%016lx, length 0x%08x\n",
                       func_ss, cmd, blocks, cdb->addr, cdb->length);
     virtio_scsi_enqueue_request(s, r, r_phys, buf, nblocks * d->block_size,
-                                closure(s->v->virtio_dev.general, virtio_scsi_io_done, sh));
+                                closure(s->v->general, virtio_scsi_io_done, sh));
 }
 
 static void virtio_scsi_io_commit(virtio_scsi s, virtqueue vq, vqmsg msg, boolean write,
                                   virtio_scsi_request r, u64 r_phys, status_handler completion)
 {
-    heap h = s->v->virtio_dev.general;
+    heap h = s->v->general;
     if (write)
         vqmsg_push(vq, msg, r_phys + offsetof(virtio_scsi_request, resp), sizeof(r->resp), true);
     vsr_complete c = closure(h, virtio_scsi_io_done, completion);
@@ -338,7 +339,7 @@ static void virtio_scsi_io_sg(virtio_scsi_disk d, boolean write, sg_list sg, ran
     u64 r_phys;
     struct scsi_cdb_readwrite_16 *cdb;
     u32 desc_blocks, req_blocks;
-    heap h = s->v->virtio_dev.general;
+    heap h = s->v->general;
     virtqueue vq = s->requestq;
     vqmsg msg;
     u32 desc_count;
@@ -405,7 +406,7 @@ static void virtio_scsi_flush(virtio_scsi_disk d, status_handler sh)
     cdb->control = 0;           /* no ACA */
     virtio_scsi_debug("%s: enqueue request %p\n", func_ss, r);
     virtio_scsi_enqueue_request(s, r, r_phys, 0, 0,
-                                closure(s->v->virtio_dev.general, virtio_scsi_io_done, sh));
+                                closure(s->v->general, virtio_scsi_io_done, sh));
 }
 
 closure_func_basic(storage_req_handler, void, virtio_scsi_req_handler,
@@ -470,7 +471,7 @@ closure_function(5, 2, void, virtio_scsi_read_capacity_done,
         }
     }
     spin_unlock(&s->lock);
-    d = allocate(s->v->virtio_dev.general, sizeof(*d));
+    d = allocate(s->v->general, sizeof(*d));
     if (d == INVALID_ADDRESS) {
         msg_err("virtio_scsi: cannot allocate disk");
         goto out;
@@ -487,7 +488,7 @@ closure_function(5, 2, void, virtio_scsi_read_capacity_done,
     virtio_scsi_debug("%s: target %d, lun %d, block size 0x%lx, capacity 0x%lx\n",
                       func_ss, target, lun, d->block_size, d->capacity);
 
-    async_apply(closure(s->v->virtio_dev.general, virtio_scsi_init_done,
+    async_apply(closure(s->v->general, virtio_scsi_init_done,
                         d, bound(attach_id), bound(a)));
   out:
     closure_finish();
@@ -511,7 +512,7 @@ closure_function(6, 2, void, virtio_scsi_test_unit_ready_done,
 
     int attach_id = bound(attach_id);
     u32 max_xfer_len = bound(max_xfer_len);
-    heap h = s->v->virtio_dev.general;
+    heap h = s->v->general;
     u64 r_phys;
     if (resp->status != SCSI_STATUS_OK) {
         if (retry_count < 3) {
@@ -594,7 +595,7 @@ closure_function(6, 2, void, virtio_scsi_inquiry_done,
         u64 r_phys;
         r = virtio_scsi_alloc_request(s, target, lun, SCSI_CMD_TEST_UNIT_READY, &r_phys);
         virtio_scsi_enqueue_request(s, r, r_phys, r->data, r->alloc_len,
-                                    closure(s->v->virtio_dev.general,
+                                    closure(s->v->general,
                                             virtio_scsi_test_unit_ready_done, bound(a), target, lun,
                                             bound(attach_id), bound(max_xfer_len), 0));
         closure_finish();
@@ -616,7 +617,7 @@ static void virtio_scsi_inquiry_vpd(virtio_scsi s, u16 target, u16 lun, u8 page_
 
 static void send_lun_inquiry(virtio_scsi s, u16 target, u16 lun)
 {
-    vsr_complete completion = closure(s->v->virtio_dev.general, virtio_scsi_inquiry_done, s->sa,
+    vsr_complete completion = closure(s->v->general, virtio_scsi_inquiry_done, s->sa,
                                       target, lun, -1, 0, 0);
     if (completion == INVALID_ADDRESS) {
         msg_err("virtio_scsi LUN inquiry: failed to allocate completion");
@@ -660,27 +661,27 @@ static void virtio_scsi_report_luns(virtio_scsi s, storage_attach a, u16 target)
     cdb->select_report = RPL_REPORT_DEFAULT;
     cdb->length = htobe32(r->alloc_len);
     virtio_scsi_enqueue_request(s, r, r_phys, r->data, r->alloc_len,
-        closure(s->v->virtio_dev.general, virtio_scsi_report_luns_done, a, target));
+        closure(s->v->general, virtio_scsi_report_luns_done, a, target));
 }
 
 static void virtio_scsi_attach(heap general, storage_attach a, backed_heap page_allocator,
-                               pci_dev _dev)
+                               vtdev v)
 {
     virtio_scsi s = allocate(general, sizeof(struct virtio_scsi));
     assert(s != INVALID_ADDRESS);
-    s->v = attach_vtpci(general, page_allocator, _dev, VIRTIO_SCSI_F_HOTPLUG);
+    s->v = v;
 
 #ifdef VIRTIO_SCSI_DEBUG
-    u32 num_queues = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_NUM_QUEUES);
+    u32 num_queues = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_NUM_QUEUES);
     virtio_scsi_debug("num queues %d\n", num_queues);
 
-    u32 max_sectors = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_MAX_SECTORS);
+    u32 max_sectors = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_MAX_SECTORS);
     virtio_scsi_debug("max sectors %d\n", max_sectors);
 
-    u32 cmd_per_lun = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_CMD_PER_LUN);
+    u32 cmd_per_lun = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_CMD_PER_LUN);
     virtio_scsi_debug("cmd per lun %d\n", cmd_per_lun);
 
-    u32 event_info_size = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_EVENT_INFO_SIZE);
+    u32 event_info_size = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_EVENT_INFO_SIZE);
     virtio_scsi_debug("event info size %d\n", event_info_size);
 
     u32 max_channel = pci_bar_read_2(&s->v->device_config, VIRTIO_SCSI_R_MAX_CHANNEL);
@@ -691,30 +692,25 @@ static void virtio_scsi_attach(heap general, storage_attach a, backed_heap page_
     s->sa = a;
     spin_lock_init(&s->lock);
 
-    s->seg_max = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_SEG_MAX);
+    s->seg_max = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_SEG_MAX);
     virtio_scsi_debug("seg max %d\n", s->seg_max);
 
-    s->max_target = pci_bar_read_2(&s->v->device_config, VIRTIO_SCSI_R_MAX_TARGET);
+    s->max_target = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_MAX_TARGET);
     virtio_scsi_debug("max target %d\n", s->max_target);
 
-    s->max_lun = pci_bar_read_4(&s->v->device_config, VIRTIO_SCSI_R_MAX_LUN);
+    s->max_lun = vtdev_cfg_read_4(s->v, VIRTIO_SCSI_R_MAX_LUN);
     virtio_scsi_debug("max lun %d\n", s->max_lun);
 
-    range cpu_affinity = irange(0, 0);
-    status st = vtpci_alloc_virtqueue(s->v, ss("virtio scsi command"), 0, cpu_affinity,
-                                      &s->command);
-    assert(st == STATUS_OK);
-    st = vtpci_alloc_virtqueue(s->v, ss("virtio scsi event"), 1, cpu_affinity, &s->eventq);
-    assert(st == STATUS_OK);
-    st = vtpci_alloc_virtqueue(s->v, ss("virtio scsi request"), 2, cpu_affinity, &s->requestq);
-    assert(st == STATUS_OK);
+    virtio_alloc_virtqueue(s->v, ss("virtio scsi command"), 0, &s->command);
+    virtio_alloc_virtqueue(s->v, ss("virtio scsi event"), 1, &s->eventq);
+    virtio_alloc_virtqueue(s->v, ss("virtio scsi request"), 2, &s->requestq);
 
     // On reset, the device MUST set sense_size to 96 and cdb_size to 32
-    pci_bar_write_4(&s->v->device_config, VIRTIO_SCSI_R_SENSE_SIZE, VIRTIO_SCSI_SENSE_SIZE);
-    pci_bar_write_4(&s->v->device_config, VIRTIO_SCSI_R_CDB_SIZE, VIRTIO_SCSI_CDB_SIZE);
+    vtdev_cfg_write_4(s->v, VIRTIO_SCSI_R_SENSE_SIZE, VIRTIO_SCSI_SENSE_SIZE);
+    vtdev_cfg_write_4(s->v, VIRTIO_SCSI_R_CDB_SIZE, VIRTIO_SCSI_CDB_SIZE);
 
     // initialization complete
-    vtpci_set_status(s->v, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+    vtdev_set_status(s->v, VIRTIO_CONFIG_STATUS_DRIVER_OK);
 
     // enqueue events
     s->events = allocate((heap)page_allocator,
@@ -730,19 +726,36 @@ static void virtio_scsi_attach(heap general, storage_attach a, backed_heap page_
         virtio_scsi_report_luns(s, a, target);
 }
 
-closure_function(3, 1, boolean, virtio_scsi_probe,
+closure_function(3, 1, boolean, virtio_scsi_pci_probe,
                  heap, general, storage_attach, a, backed_heap, page_allocator,
                  pci_dev d)
 {
     if (!vtpci_probe(d, VIRTIO_ID_SCSI))
         return false;
 
-    virtio_scsi_attach(bound(general), bound(a), bound(page_allocator), d);
+    heap general = bound(general);
+    vtdev v = (vtdev)attach_vtpci(general, bound(page_allocator), d, VIRTIO_SCSI_F_HOTPLUG);
+    virtio_scsi_attach(general, bound(a), bound(page_allocator), v);
     return true;
+}
+
+closure_function(3, 1, void, virtio_scsi_mmio_probe,
+                 heap, general, storage_attach, a, backed_heap, page_allocator,
+                 vtmmio d)
+{
+    if ((vtmmio_get_u32(d, VTMMIO_OFFSET_DEVID) != VIRTIO_ID_SCSI) ||
+            (d->memsize < VTMMIO_OFFSET_CONFIG +
+            sizeof(struct virtio_scsi_config)))
+        return;
+    heap general = bound(general);
+    if (attach_vtmmio(general, bound(page_allocator), d, VIRTIO_SCSI_F_HOTPLUG))
+        virtio_scsi_attach(general, bound(a), bound(page_allocator), (vtdev)d);
 }
 
 void init_virtio_scsi(kernel_heaps kh, storage_attach a)
 {
     heap h = heap_locked(kh);
-    register_pci_driver(closure(h, virtio_scsi_probe, h, a, heap_linear_backed(kh)), 0);
+    backed_heap page_allocator = heap_linear_backed(kh);
+    register_pci_driver(closure(h, virtio_scsi_pci_probe, h, a, heap_linear_backed(kh)), 0);
+    vtmmio_probe_devs(stack_closure(virtio_scsi_mmio_probe, h, a, page_allocator));
 }
