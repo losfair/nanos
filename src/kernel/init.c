@@ -240,7 +240,7 @@ closure_function(4, 2, void, fsstarted,
         bprintf(b, "unable to open filesystem: ");
         print_value(b, s, 0);
         buffer_print(b);
-        halt("\n");
+        return;
     }
 
     if (root_fs)
