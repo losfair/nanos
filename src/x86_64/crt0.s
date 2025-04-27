@@ -29,17 +29,12 @@ extern  init_service
 %endmacro
 
 ;; rdi is frame
-%macro load_seg_base 1
-%if (%1 == FRAME_FSBASE)
+%macro load_seg_base 0
         mov rax, [rdi+FRAME_FSBASE*8]
-        mov rcx, FS_MSR
-%else
+        wrfsbase rax
+        swapgs
         mov rax, [rdi+FRAME_GSBASE*8]
-        mov rcx, KERNEL_GS_MSR
-%endif
-        mov rdx, rax
-        shr rdx, 0x20
-        wrmsr
+        wrgsbase rax
 %endmacro
 
 extern use_xsave
@@ -187,9 +182,7 @@ frame_return:
         je .skip
 
         ;; XXX should be lazy?
-        load_seg_base FRAME_FSBASE
-        load_seg_base FRAME_GSBASE
-        swapgs
+        load_seg_base
 .skip:
         load_extended_registers rdi
         mov rax, [rdi+FRAME_RAX*8]
@@ -274,8 +267,7 @@ syscall_return:
         ; set CPL 3
         or byte [rdi+FRAME_CS*8], 3
         ;; XXX lazy?
-        load_seg_base FRAME_FSBASE
-        load_seg_base FRAME_GSBASE
+        load_seg_base
         load_extended_registers rdi
         mov rax, [rdi+FRAME_RAX*8]
         mov rbx, [rdi+FRAME_RBX*8]
@@ -293,7 +285,6 @@ syscall_return:
         mov rsp, [rdi+FRAME_RSP*8]
         mov rcx, [rdi+FRAME_RIP*8]
         mov rdi, [rdi+FRAME_RDI*8]
-        swapgs
         o64 sysret
 .end:
 
