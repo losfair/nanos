@@ -310,7 +310,7 @@ context_suspend:
         mov [rbx+FRAME_EFLAGS*8], rax
         pop rax                 ; return addr
         mov [rbx+FRAME_RIP*8], rax
-        mov [rbx+FRAME_CS*8], cs
+        mov qword [rbx+FRAME_CS*8], 0x8
         mov [rbx+FRAME_SS*8], ss
         mov [rbx+FRAME_RSP*8], rsp
         mov rdi, rbx
