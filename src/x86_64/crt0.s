@@ -15,6 +15,7 @@ extern  init_service
 %include "frame.inc"
 %define FS_MSR        0xc0000100
 %define KERNEL_GS_MSR 0xc0000102
+%define PV_MACHINE
 
 %ifdef DEBUG
 %include "debug.inc"
@@ -32,7 +33,17 @@ extern  init_service
 %macro load_seg_base 0
         mov rax, [rdi+FRAME_FSBASE*8]
         wrfsbase rax
+%ifdef PV_MACHINE
+        mov rax, [gs:48]
+        cmp rax, 0
+        je %%swap
+        rdgsbase rcx
+        mov [rax+8], rcx ; kernel gsbase
+        jmp %%skip
+%endif
+%%swap:
         swapgs
+%%skip:
         mov rax, [rdi+FRAME_GSBASE*8]
         wrgsbase rax
 %endmacro

@@ -1310,7 +1310,7 @@ static sysreturn mmap(void *addr, u64 length, int prot, int flags, int fd, u64 o
     pagecache_node node = 0;
     if (flags & MAP_ANONYMOUS) {
         vmap_mmap_type = VMAP_MMAP_TYPE_ANONYMOUS;
-        vmflags |= VMAP_FLAG_THP;
+        // vmflags |= VMAP_FLAG_THP;
         allowed_flags = anon_perms(p);
     } else {
         desc = resolve_fd(p, fd); /* must return via out label to release fdesc */
@@ -1443,7 +1443,7 @@ sysreturn madvise(void *addr, s64 length, int advice)
     u32 clear_mask = 0, set_mask = 0;
     switch (advice) {
     case MADV_HUGEPAGE:
-        set_mask = VMAP_FLAG_THP;
+        // set_mask = VMAP_FLAG_THP;
         break;
     case MADV_NOHUGEPAGE:
         clear_mask = VMAP_FLAG_THP;
@@ -1565,7 +1565,7 @@ void mmap_process_init(process p, tuple root)
 {
     kernel_heaps kh = get_kernel_heaps();
     heap h = heap_locked(kh);
-    boolean aslr = !get(root, sym(noaslr));
+    boolean aslr = false && !get(root, sym(noaslr));
     mmap_info.h = h;
     value transparent_hugepage = get(root, sym(transparent_hugepage));
     if (transparent_hugepage) {

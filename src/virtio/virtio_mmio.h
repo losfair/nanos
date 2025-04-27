@@ -40,12 +40,7 @@ typedef struct vtmmio_dev {
 #ifdef VTMMIO_HYPERCALL
 static inline u64 vtmmio_hypercall(u64 opcode, u64 addr, u64 val)
 {
-    register u64 rax asm("rax") = opcode;
-    register u64 rbx asm("rbx") = addr;
-    register u64 rcx asm("rcx") = val;
-
-    asm volatile("vmcall" : "+r"(rax) : "r"(rbx), "r"(rcx) : "memory");
-    return rax;
+    return mmio_hypercall(opcode, addr, val);
 }
 
 #define vtmmio_get_u8(dev, offset) ((u8)vtmmio_hypercall(0x1000, (dev)->membase + offset, 0))

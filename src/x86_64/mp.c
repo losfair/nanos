@@ -120,7 +120,7 @@ void allocate_apboot(heap stackheap, void (*ap_entry)())
     start_callback = ap_entry;
 
     set_page_write_protect(false);
-    asm("sidt %0": "=m"(ap_idt_pointer));
+    asm("lea %0, %%rax; sidt (%%rax)": "=m"(ap_idt_pointer) : : "rax");
     mov_from_cr("cr3", ap_pagetable);
     set_page_write_protect(true);
     // just one function call

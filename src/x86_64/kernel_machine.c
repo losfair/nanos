@@ -88,6 +88,16 @@ void init_cpuinfo_machine(cpuinfo ci, heap backed)
     ci->m.exception_stack = allocate_stack(backed, EXCEPT_STACK_SIZE);
     ci->m.int_stack = allocate_stack(backed, INT_STACK_SIZE);
 
+#ifdef PV_MACHINE
+    u32 cs = 0;
+    asm ("mov %%cs, %0" : "=r" (cs));
+    if ((cs & 3) == 3) {
+        ci->m.pv_page = pointer_from_u64(0x7f8000000000);
+    } else {
+        ci->m.pv_page = 0;
+    }
+#endif
+
     /* Separate stack to keep exceptions in interrupt handlers from
        trashing the interrupt stack */
     set_ist(&ci->m, IST_EXCEPTION, u64_from_pointer(ci->m.exception_stack));

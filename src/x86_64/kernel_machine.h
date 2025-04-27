@@ -114,38 +114,7 @@ static inline void disable_interrupts()
     asm volatile("cli");
 }
 
-static inline u32 read_eflags(void)
-{
-    u32 out;
-    asm volatile("pushfd; popl %0" : "=r"(out) :: "memory");
-    return out;
-}
-
-static inline u64 read_flags(void)
-{
-    u64 out;
-    asm volatile("pushfq; popq %0" : "=r"(out) :: "memory");
-    return out;
-}
-
-static inline u64 irq_disable_save(void)
-{
-    u64 flags = read_flags();
-    disable_interrupts();
-    return flags;
-}
-
-static inline u64 irq_enable_save(void)
-{
-    u64 flags = read_flags();
-    enable_interrupts();
-    return flags;
-}
-
-static inline void irq_restore(u64 flags)
-{
-    asm volatile("push %0; popf" :: "g"(flags) : "memory", "cc");
-}
+#define PV_MACHINE
 
 static inline void wait_for_interrupt(void)
 {
@@ -164,35 +133,6 @@ void init_cpu_features();
 
 void set_ist(struct cpuinfo_machine *cpu, int i, u64 sp);
 void install_gdt64_and_tss(void *tss_desc, void *tss, void *gdt, void *gdt_pointer);
-
-static inline u64 mmio_hypercall(u64 opcode, u64 addr, u64 val)
-{
-    register u64 rax asm("rax") = opcode;
-    register u64 rbx asm("rbx") = addr;
-    register u64 rcx asm("rcx") = val;
-
-    asm volatile("vmcall" : "+r"(rax) : "r"(rbx), "r"(rcx) : "memory");
-    return rax;
-}
-static inline u32 hvmmio_read_32(u64 addr)
-{
-    return (u32)mmio_hypercall(0x1002, addr, 0);
-}
-
-static inline u64 hvmmio_read_64(u64 addr)
-{
-    return (u64)mmio_hypercall(0x1003, addr, 0);
-}
-
-static inline void hvmmio_write_32(u64 addr, u32 val)
-{
-    mmio_hypercall(0x1012, addr, val);
-}
-
-static inline void hvmmio_write_64(u64 addr, u64 val)
-{
-    mmio_hypercall(0x1013, addr, val);
-}
 
 /* device mmio region access */
 static inline u32 mmio_read_32(u64 addr)
@@ -306,6 +246,13 @@ typedef struct {
     u8 data[8];
 } seg_desc_t;
 
+#ifdef PV_MACHINE
+struct pv_page {
+    u64 flags;
+    u64 kernel_gsbase;
+};
+#endif
+
 struct cpuinfo_machine {
     /*** Fields accessed by low-level entry points. ***/
     /* Don't move these without updating gs-relative accesses in crt0.s ***/
@@ -325,9 +272,14 @@ struct cpuinfo_machine {
     /* One temporary for syscall enter to use so that we don't need to touch the user stack. +32 */
     u64 tmp;
 
-#ifdef CONFIG_FTRACE
     /* Used by mcount to determine if to enter ftrace code. +40 */
     u64 ftrace_disable_cnt;
+
+    /* Used by interrupt and syscall return code to do pv swapgs. +48 */
+#ifdef PV_MACHINE
+    struct pv_page *pv_page;
+#else
+    u64 _pv_page_padding;
 #endif
 
     /*** End of fields touched by kernel entries ***/
@@ -510,6 +462,48 @@ static inline boolean validate_frame_ptr(u64 *fp)
         !validate_virtual(fp + 1, sizeof(u64)))
         return false;
     return true;
+}
+
+static inline u64 read_flags(void)
+{
+    u64 out;
+#ifdef PV_MACHINE
+    struct pv_page *pv = ((struct cpuinfo_machine *) current_cpu())->pv_page;
+    asm volatile("rex pushfq; popq %0" : "=r"(out) :: "memory");
+    if (pv && !(pv->flags & U64_FROM_BIT(9))) {
+        out &= ~U64_FROM_BIT(9);
+    }
+#else
+    asm volatile("pushfq; popq %0" : "=r"(out) :: "memory");
+#endif
+    return out;
+}
+
+static inline u64 irq_disable_save(void)
+{
+    u64 flags = read_flags();
+    disable_interrupts();
+    return flags;
+}
+
+static inline u64 irq_enable_save(void)
+{
+    u64 flags = read_flags();
+    enable_interrupts();
+    return flags;
+}
+
+static inline void irq_restore(u64 flags)
+{
+#ifdef PV_MACHINE
+    struct pv_page *pv = ((struct cpuinfo_machine *) current_cpu())->pv_page;
+    asm volatile("push %0; rex popf" :: "g"(flags) : "memory", "cc");
+    if (pv) {
+        pv->flags = flags & U64_FROM_BIT(9);
+    }
+#else
+    asm volatile("push %0; popf" :: "g"(flags) : "memory", "cc");
+#endif
 }
 #endif
 
