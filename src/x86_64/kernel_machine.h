@@ -248,8 +248,9 @@ typedef struct {
 
 #ifdef PV_MACHINE
 struct pv_page {
-    u64 flags;
-    u64 kernel_gsbase;
+    volatile u64 flags;
+    volatile u64 kernel_gsbase;
+    volatile u64 interrupt_window_requested;
 };
 #endif
 
@@ -500,6 +501,10 @@ static inline void irq_restore(u64 flags)
     asm volatile("push %0; rex popf" :: "g"(flags) : "memory", "cc");
     if (pv) {
         pv->flags = flags & U64_FROM_BIT(9);
+        if (pv->flags && pv->interrupt_window_requested) {
+            // PV interrupt window
+            enable_interrupts();
+        }
     }
 #else
     asm volatile("push %0; popf" :: "g"(flags) : "memory", "cc");
